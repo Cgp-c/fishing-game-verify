@@ -132,11 +132,30 @@ def icon_rounded(size: int, grad_top: tuple, grad_bottom: tuple, ch: str,
     return img
 
 
+def icon_circle(size: int, grad_top: tuple, grad_bottom: tuple, ch: str,
+                border: tuple, ring: tuple) -> Image.Image:
+    """圆形图标（真实游戏左侧功能图标为圆形带金边样式）。"""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    grad = vgrad(size, size, grad_top, grad_bottom).convert("RGBA")
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).ellipse([1, 1, size - 2, size - 2], fill=255)
+    img.paste(grad, (0, 0), mask)
+    d = ImageDraw.Draw(img)
+    d.ellipse([1, 1, size - 2, size - 2], outline=border, width=3)
+    d.ellipse([4, 4, size - 5, size - 5], outline=ring, width=2)
+    f = font(int(size * 0.56))
+    bbox = d.textbbox((0, 0), ch, font=f)
+    d.text(((size - bbox[2] - bbox[0]) / 2, (size - bbox[3] - bbox[1]) / 2 - 1),
+           ch, font=f, fill=(255, 252, 240, 255),
+           stroke_width=2, stroke_fill=(60, 30, 10, 160))
+    return img
+
+
 def make_side_icons() -> None:
-    # 左侧竖排功能图标：求福（主锚点）、垂钓助手、奇异生物
-    icon_rounded(56, (232, 84, 84), (188, 46, 46), "福", (250, 214, 120)).save(ASSETS / "qiufu.png")
-    icon_rounded(56, (94, 152, 214), (52, 100, 168), "钓", (222, 238, 250)).save(ASSETS / "icon_assist.png")
-    icon_rounded(56, (150, 112, 196), (100, 66, 148), "异", (232, 224, 250)).save(ASSETS / "icon_strange.png")
+    # 左侧竖排功能图标（真实：垂钓助手在上、求福居中、奇异生物在下；圆形）
+    icon_circle(56, (238, 120, 84), (176, 52, 40), "福", (250, 214, 120), (255, 240, 200)).save(ASSETS / "qiufu.png")
+    icon_circle(56, (104, 160, 218), (48, 96, 162), "钓", (226, 240, 252), (240, 250, 255)).save(ASSETS / "icon_assist.png")
+    icon_circle(56, (158, 118, 200), (92, 60, 142), "异", (234, 226, 252), (244, 238, 255)).save(ASSETS / "icon_strange.png")
 
 
 def make_equip_icons() -> None:
@@ -181,16 +200,24 @@ def make_fish(name: str, tint: tuple[int, int, int]) -> None:
     img.save(ASSETS / f"fish_{name}.png")
 
 
-def make_banner() -> None:
-    """金色横幅底图（'恭喜获得'文字运行时叠加）。"""
-    img = vgrad(400, 74, (238, 196, 92), (206, 150, 52)).convert("RGBA")
+def make_banner_strip() -> None:
+    """结算顶部细金横幅条（全宽，真实截图 y20%~23%；文字运行时叠加）。"""
+    w, h = 536, 38
+    img = vgrad(w, h, (240, 202, 100), (198, 142, 48)).convert("RGBA")
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([0, 0, 399, 73], radius=18, outline=(120, 84, 28), width=3)
-    d.rounded_rectangle([6, 6, 393, 67], radius=14, outline=(255, 236, 170), width=2)
-    # 两端飘带
-    d.polygon([(-18, 20), (0, 30), (0, 52), (-18, 62)], fill=(188, 132, 44))
-    d.polygon([(418, 20), (400, 30), (400, 52), (418, 62)], fill=(188, 132, 44))
-    img.save(ASSETS / "banner_gold.png")
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=h // 2, outline=(122, 86, 30), width=2)
+    d.rounded_rectangle([3, 3, w - 4, h - 4], radius=h // 2 - 2, outline=(255, 238, 176), width=1)
+    # 两端小菱形装饰
+    for cx in (14, w - 14):
+        d.polygon([(cx, 6), (cx + 8, h // 2), (cx, h - 6), (cx - 8, h // 2)],
+                  fill=(168, 118, 40), outline=(255, 232, 168))
+    img.save(ASSETS / "banner_strip.png")
+
+
+def make_scrim() -> None:
+    """结算态全屏压暗遮罩（60% 黑，真实游戏为全屏半透明暗罩）。"""
+    img = Image.new("RGBA", (W, H), (8, 6, 12, 153))
+    img.save(ASSETS / "scrim.png")
 
 
 def main() -> None:
@@ -201,7 +228,8 @@ def main() -> None:
     make_side_icons()
     make_equip_icons()
     make_bobber()
-    make_banner()
+    make_banner_strip()
+    make_scrim()
     import sys
     sys.path.insert(0, str(ASSETS.parent))
     from fish_data import FISH, RARITIES

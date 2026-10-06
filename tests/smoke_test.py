@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 """冒烟测试：以"将来的检测程序"的方式（纯截屏 + 图像识别）验证游戏。
 
-覆盖：
+布局与真实游戏截图比例一致（config.LAYOUT / docs/layout.md）。覆盖：
   1. 求福主锚点：钓鱼三态可检（模板匹配≥0.85），HOME/订单详情/活动公告不可检
-     —— 即"非钓鱼界面自动暂停"链路
-  2. 装备栏辅助锚点可隐藏，隐藏后求福仍可检（检测不得依赖装备栏）
+  2. 装备面板辅助锚点可隐藏，隐藏后求福仍可检（检测不得依赖装备面板）
   3. 五种稀有度名字颜色分类全部正确（名字条带内 HSV 分类）
   4. 出售(蓝)/提交订单(橙金)两种按钮均出现且可区分；提交订单推进订单进度
-  5. 误触链路：点击订单重叠带 → 订单详情弹出 → 求福不可检 → 关闭恢复
-  6. 等待期任何点击无效
+  5. 误触链路：点击订单面板（模拟检测程序点击越界偏高）→ 订单详情弹出
+     → 求福不可检 → 关闭恢复
+  6. 等待期任何点击无效；结算横幅（金色）可检
   7. 三套背景不影响以上全部判定
 
 运行：  python tests/smoke_test.py   （会短暂弹出游戏窗口）
@@ -50,23 +50,27 @@ def ctr(z: dict) -> tuple[float, float]:
 
 # ---------------------------------------------------------------- 检测函数（模拟将来插件）
 def load_qiufu_template() -> np.ndarray:
-    img = np.array(Image.open(ROOT / "game" / "assets" / "qiufu.png").convert("RGB"))
-    return img[2:54, 2:54].astype(np.uint8)
+    """圆形求福图标：缩放到绘制尺寸 48px，取圆心附近 28px 完全不透明区域做模板
+    （避开透明角，避免模板与截图背景不匹配）。"""
+    img = Image.open(ROOT / "game" / "assets" / "qiufu.png").convert("RGBA")
+    img = img.resize((48, 48), Image.LANCZOS)
+    arr = np.array(img).astype(np.uint8)
+    return arr[10:38, 10:38, :3]      # 28x28 圆内不透明区
 
 
 def qiufu_match(shot: np.ndarray, tpl: np.ndarray) -> float:
-    """对求福图标区域做归一化互相关模板匹配，返回最高得分。"""
+    """求福图标区域（左侧 y66.5%~71.5% 圆形图标）模板匹配。"""
     import cv2
     h, w = shot.shape[:2]
-    crop = shot[int(.696 * h):int(.80 * h), int(.028 * w):int(.17 * w)]
+    crop = shot[int(.655 * h):int(.730 * h), int(.010 * w):int(.170 * w)]
     res = cv2.matchTemplate(crop.astype(np.uint8), tpl, cv2.TM_CCOEFF_NORMED)
     return float(res.max())
 
 
 def classify_nameband(shot: np.ndarray) -> tuple[str, int]:
-    """在名字条带内对饱和像素做色相分类，返回 (稀有度, 饱和像素数)。"""
+    """名字条带（x38%~62%, y49.5%~56.5%，排除左右金色纹样）内色相分类。"""
     h, w = shot.shape[:2]
-    band = shot[int(.48 * h):int(.56 * h), int(.30 * w):int(.70 * w)].reshape(-1, 3)
+    band = shot[int(.495 * h):int(.565 * h), int(.38 * w):int(.62 * w)].reshape(-1, 3)
     mx, mn = band.max(1).astype(int), band.min(1).astype(int)
     sel = band[((mx - mn) > 60) & (mx > 90)]
     n = len(sel)
@@ -81,18 +85,33 @@ def classify_nameband(shot: np.ndarray) -> tuple[str, int]:
 
 
 def button_kind(shot: np.ndarray) -> str:
-    """识别左下按钮：蓝=出售 / 橙金=提交订单。"""
+    """识别左下按钮（x14%~43%, y79%~86%）：蓝=出售 / 橙金=提交订单。"""
     h, w = shot.shape[:2]
     z = LAYOUT["btn_left"]
-    px = shot[int(z["y0"] * h):int(z["y1"] * h),
-              int(z["x0"] * w):int(z["x1"] * w)].reshape(-1, 3).astype(int)
-    blue = ((px[:, 2] > px[:, 0] + 40) & (px[:, 2] > px[:, 1] + 30) & (px[:, 2] > 140)).sum()
-    orange = ((px[:, 0] > 200) & (px[:, 1] > 130) & (px[:, 1] < 210) & (px[:, 2] < 120)).sum()
+    px_ = shot[int(z["y0"] * h):int(z["y1"] * h),
+               int(z["x0"] * w):int(z["x1"] * w)].reshape(-1, 3).astype(int)
+    blue = ((px_[:, 2] > px_[:, 0] + 40) & (px_[:, 2] > px_[:, 1] + 30) & (px_[:, 2] > 140)).sum()
+    orange = ((px_[:, 0] > 200) & (px_[:, 1] > 130) & (px_[:, 1] < 210) & (px_[:, 2] < 120)).sum()
     if blue > 1500 and blue > orange:
         return "出售"
     if orange > 1500 and orange > blue:
         return "提交订单"
     return "未识别"
+
+
+def equip_dark_px(shot: np.ndarray) -> int:
+    """装备面板区域（x15%~90%, y15%~44%）的深色面板像素数。"""
+    h, w = shot.shape[:2]
+    z = LAYOUT["equip_panel"]
+    px_ = shot[int(z["y0"] * h):int(z["y1"] * h), int(z["x0"] * w):int(z["x1"] * w)]
+    return int((px_.max(2).astype(int) < 90).sum())
+
+
+def banner_gold_px(shot: np.ndarray) -> int:
+    """结算金色横幅条（x2%~98%, y20%~23%+文字区）像素数。"""
+    h, w = shot.shape[:2]
+    px_ = shot[int(.19 * h):int(.30 * h), int(.02 * w):int(.98 * w)].reshape(-1, 3).astype(int)
+    return int(((px_[:, 0] > 190) & (px_[:, 1] > 140) & (px_[:, 2] < 130)).sum())
 
 
 # ---------------------------------------------------------------- 截屏/驱动
@@ -138,20 +157,18 @@ def main() -> int:
     check("HOME 无求福锚点（应触发自动暂停）", qiufu_match(img, tpl) < 0.30,
           f"match={qiufu_match(img, tpl):.2f}")
 
-    # ---- 2. READY：主锚点 + 辅助锚点 + 可隐藏 ----
+    # ---- 2. READY：主锚点 + 辅助锚点（装备面板）+ 可隐藏 ----
     print("[2] READY 双锚点")
     ui.click_pct(*ctr(LAYOUT["home_btn"]))
     img = shot(ui, f"02_ready_{m.theme}")
     check("READY 求福可检", qiufu_match(img, tpl) >= 0.85, f"match={qiufu_match(img, tpl):.2f}")
-    equip_px = img[int(.012 * WINDOW_H):int(.062 * WINDOW_H),
-                   int(.03 * WINDOW_W):int(.70 * WINDOW_W)]
-    check("READY 装备栏存在", (equip_px.max(2).astype(int) < 90).sum() > 3000)
-    ui.click_pct(*ctr(LAYOUT["settings"]))            # 隐藏装备栏
+    shown = equip_dark_px(img)
+    check("READY 装备面板存在", shown > 30000, f"darkpx={shown}")
+    ui.click_pct(*ctr(LAYOUT["settings"]))            # 隐藏装备面板
     img = shot(ui, f"03_ready_noequip_{m.theme}")
-    equip_px = img[int(.012 * WINDOW_H):int(.062 * WINDOW_H),
-                   int(.03 * WINDOW_W):int(.70 * WINDOW_W)]
-    check("装备栏已隐藏", (equip_px.max(2).astype(int) < 90).sum() == 0)
-    check("隐藏装备栏后求福仍可检（不得依赖辅助锚点）", qiufu_match(img, tpl) >= 0.85,
+    hidden = equip_dark_px(img)
+    check("装备面板已隐藏", hidden < 20000, f"darkpx={hidden}")
+    check("隐藏装备面板后求福仍可检（不得依赖辅助锚点）", qiufu_match(img, tpl) >= 0.85,
           f"match={qiufu_match(img, tpl):.2f}")
     ui.click_pct(*ctr(LAYOUT["settings"]))            # 恢复
 
@@ -162,13 +179,14 @@ def main() -> int:
         ui.click_pct(*xy)
     check("等待期点击不改变状态", m.state is State.WAITING, m.state.name)
     img = shot(ui, "04_waiting")
-    bobber = img[int(.66 * WINDOW_H):int(.76 * WINDOW_H), int(.40 * WINDOW_W):int(.55 * WINDOW_W)]
-    check("鱼漂可见", (bobber.min(2) > 200).sum() > 300)
+    bz = LAYOUT["bobber"]
+    bobber = img[int((bz["y0"] - .01) * WINDOW_H):int((bz["y1"] + .01) * WINDOW_H),
+                 int((bz["x0"] - .01) * WINDOW_W):int((bz["x1"] + .01) * WINDOW_W)]
+    check("鱼漂可见（真实位置 x49.5%,y84%）", (bobber.min(2) > 190).sum() > 150)
     check("WAITING 求福可检", qiufu_match(img, tpl) >= 0.85, f"match={qiufu_match(img, tpl):.2f}")
 
-    # ---- 4. 五色鱼：名字分类 + 按钮区分 + 订单推进 ----
+    # ---- 4. 五色鱼：名字分类 + 按钮区分 + 订单推进 + 横幅可检 ----
     print("[4] 五色鱼获")
-    # 三种黄鱼各挂一条订单：钓到任一黄鱼 → 提交订单（橙金），其余稀有度 → 出售（蓝）
     yellow_orders = [Order(fish=f, need=1, reward=66) for f in ("霓虹鱼", "鳟鱼", "骨舌鱼")]
     m.orders.orders = yellow_orders
     themes_seen: set[str] = set()
@@ -183,6 +201,8 @@ def main() -> int:
         want_kind = "提交订单" if m.catch.rarity == "黄" else "出售"
         kind = button_kind(img)
         check(f"按钮识别 {m.catch.name} -> {kind}", kind == want_kind, f"want={want_kind}")
+        bg = banner_gold_px(img)
+        check(f"结算金色横幅可检", bg > 4000, f"goldpx={bg}")
         ui.click_pct(*ctr(LAYOUT["btn_left"]))
         ui.root.update()
         if m.state is State.RANDOM_POPUP:
@@ -193,13 +213,13 @@ def main() -> int:
     check("提交订单推进订单（黄鱼订单已达成）", len(done_orders) == 1, str(done_orders))
     check("三套背景至少出现两套（跨背景判定）", len(themes_seen) >= 2, ",".join(sorted(themes_seen)))
 
-    # ---- 5. 误触链路：重叠带点击 → 订单详情 → 求福不可检 → 关闭 ----
+    # ---- 5. 误触链路：点击订单面板（模拟点击越界偏高）→ 订单详情 → 求福不可检 → 关闭 ----
     print("[5] 误触链路")
     assert m.state is State.READY, m.state
     m.orders.orders = [Order(fish="海星", need=2, reward=40)]
-    act = ui.click_pct(*ctr(LAYOUT["overlap"]))
+    act = ui.click_pct(*ctr(LAYOUT["order_rows"]))
     img = shot(ui, "06_order_detail")
-    check("重叠带点击弹出订单详情", act == "open_detail" and m.state is State.ORDER_DETAIL)
+    check("点击订单条目弹出订单详情", act == "open_detail" and m.state is State.ORDER_DETAIL)
     check("订单详情下求福不可检（自动暂停链路）", qiufu_match(img, tpl) < 0.30,
           f"match={qiufu_match(img, tpl):.2f}")
     ui.click_pct(*ctr(LAYOUT["close_x"]))

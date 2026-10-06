@@ -41,9 +41,12 @@ class Demo:
         if st is State.HOME:
             act = self.ui.click_pct(*center(LAYOUT["home_btn"]))
         elif st is State.READY:
-            # 80% 安全区抛竿，20% 全区随机（可能误触订单面板 → 订单详情）
-            z = SAFE_CAST if self.rng.random() < 0.8 else LAYOUT["cast_zone"]
-            act = self.ui.click_pct(*rand_in(self.rng, z))
+            roll = self.rng.random()
+            if roll < 0.12:
+                # 模拟检测程序"点击越界偏高"：落到右侧订单面板 → 误触订单详情
+                act = self.ui.click_pct(*rand_in(self.rng, LAYOUT["order_rows"]))
+            else:
+                act = self.ui.click_pct(*rand_in(self.rng, SAFE_CAST))
             delay = self.rng.randint(700, 1600)
         elif st is State.CATCH:
             act = self.ui.click_pct(*center(LAYOUT["btn_left"]))
