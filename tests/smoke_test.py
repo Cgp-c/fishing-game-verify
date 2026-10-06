@@ -150,6 +150,8 @@ def main() -> int:
                   force_rarities=["白", "绿", "蓝", "紫", "黄"])
     ui = GameUI(m)
     ui.paused = True     # 暂停自动推进，全部由测试显式驱动（消除异步竞态）
+    ui.root.attributes("-topmost", True)   # 置顶，防止被其他窗口遮挡导致截屏失真
+    ui.root.lift()
 
     # ---- 1. HOME：非钓鱼界面 ----
     print("[1] HOME")
