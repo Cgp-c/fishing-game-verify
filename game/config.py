@@ -69,6 +69,7 @@ SAFE_CAST = {"x0": 0.250, "y0": 0.780, "x1": 0.750, "y1": 0.920}
 
 THEMES = ["taolin", "qingshan", "luwei"]          # 三套背景（每次抛竿随机切换）
 RANDOM_AD_CHANCE = 0.12                            # 卖鱼后弹活动公告概率
+RANDOM_AD_PER_SEC = 0.008                          # 钓鱼三态期间随机插入活动公告的每秒概率（≈2分钟一次，极端条件）
 ORDER_COUNT = (2, 3)                               # 订单条数范围
 ORDER_QTY = (1, 3)                                 # 单条订单数量范围
 

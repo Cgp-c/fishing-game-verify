@@ -2,8 +2,11 @@
 
     python game/main.py [--demo] [--force-rarity=白,绿,蓝,紫,黄] [--force-order]
                         [--wait-min=6] [--wait-max=15] [--seed=123]
+                        [--ad-rate=0.008] [--force-popup]
 
 --demo：自动演示（自动抛竿/处理鱼获/关弹窗，偶尔"手滑"点进订单区触发误触场景）。
+--ad-rate：钓鱼三态期间随机插入活动公告的每秒概率（默认 0.008≈2分钟一次；0 禁用）。
+--force-popup：进入钓鱼后立即弹一次活动公告（任意阶段弹窗的手动验证钩子）。
 """
 from __future__ import annotations
 
@@ -71,6 +74,10 @@ def main() -> None:
     ap.add_argument("--force-order", action="store_true", help="强制每次鱼获匹配订单")
     ap.add_argument("--wait-min", type=float, default=6.0)
     ap.add_argument("--wait-max", type=float, default=15.0)
+    ap.add_argument("--ad-rate", type=float, default=0.008,
+                    help="钓鱼期间随机插入活动公告的每秒概率（0=禁用）")
+    ap.add_argument("--force-popup", action="store_true",
+                    help="进入钓鱼后立即弹一次活动公告")
     ap.add_argument("--seed", type=int, default=None)
     args = ap.parse_args()
 
@@ -84,7 +91,8 @@ def main() -> None:
 
     model = GameModel(seed=args.seed, wait_min=args.wait_min, wait_max=args.wait_max,
                       force_rarities=[s for s in args.force_rarity.split(",") if s],
-                      force_order=args.force_order)
+                      force_order=args.force_order, ad_rate=args.ad_rate,
+                      force_popup=args.force_popup)
     ui = GameUI(model)
     ui.root.title(WINDOW_TITLE)
     if args.demo:

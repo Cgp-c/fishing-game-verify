@@ -10,6 +10,9 @@
      → 求福不可检 → 关闭恢复
   6. 等待期任何点击无效；结算横幅（金色）可检
   7. 三套背景不影响以上全部判定
+  8. 极端条件：活动公告可在任意钓鱼阶段（READY/WAITING/CATCH）随机插入
+     ——弹窗下求福不可检（自动暂停链路）；关闭后原样恢复被打断的阶段
+     （等待计时暂停、鱼获保留），恢复后求福可检（自动继续）
 
 运行：  python tests/smoke_test.py   （会短暂弹出游戏窗口）
 退出码：0 全部通过；1 存在失败项。截图存于 tests/__screenshots__/。
@@ -146,7 +149,7 @@ def main() -> int:
             pass
 
     tpl = load_qiufu_template()
-    m = GameModel(seed=7, wait_min=0.02, wait_max=0.05,
+    m = GameModel(seed=7, wait_min=0.02, wait_max=0.05, ad_rate=0.0,
                   force_rarities=["白", "绿", "蓝", "紫", "黄"])
     ui = GameUI(m)
     ui.paused = True     # 暂停自动推进，全部由测试显式驱动（消除异步竞态）
@@ -180,6 +183,11 @@ def main() -> int:
     for xy in [ctr(LAYOUT["order_panel"]), (0.5, 0.9), ctr(LAYOUT["qiufu"])]:
         ui.click_pct(*xy)
     check("等待期点击不改变状态", m.state is State.WAITING, m.state.name)
+    eq, ev_n = m.equip_visible, len(m.events)
+    ui.click_pct(*ctr(LAYOUT["settings"]))            # "设"按钮也不得穿透（闭环自检发现的 bug 回归）
+    check("等待期点击设按钮无效（任何点击无效）",
+          m.state is State.WAITING and m.equip_visible == eq and len(m.events) == ev_n,
+          f"equip={m.equip_visible}")
     img = shot(ui, "04_waiting")
     bz = LAYOUT["bobber"]
     bobber = img[int((bz["y0"] - .01) * WINDOW_H):int((bz["y1"] + .01) * WINDOW_H),
@@ -243,6 +251,64 @@ def main() -> int:
     ui.click_pct(*ctr(LAYOUT["ad_close_x"]))
     ui.root.update()
     check("公告关闭回到 READY", m.state is State.READY)
+
+    # ---- 7. 极端条件：活动公告可在任意钓鱼阶段插入，关闭后原样恢复 ----
+    print("[7] 任意阶段弹窗（极端条件）")
+    states_mod.RANDOM_AD_CHANCE = 0.0            # 卖鱼后不再随机弹（本节用强制钩子，保证确定性）
+    assert m.state is State.READY
+
+    # 7a. 打断 WAITING
+    ui.click_pct(*ctr(LAYOUT["cast_zone"]))
+    assert m.state is State.WAITING, m.state
+    left_before = m.wait_left
+    check("WAITING 可被弹窗打断", m.force_random_popup() and m.state is State.RANDOM_POPUP)
+    img = shot(ui, "09_popup_over_waiting")
+    check("打断 WAITING 的弹窗下求福不可检（自动暂停链路）", qiufu_match(img, tpl) < 0.30,
+          f"match={qiufu_match(img, tpl):.2f}")
+    m.tick(1.0)                                  # 弹窗期间推 1s（> 剩余等待），计时不应走
+    ui.root.update()
+    check("弹窗期间等待计时暂停", m.state is State.RANDOM_POPUP and m.wait_left == left_before,
+          f"wait_left={m.wait_left:.3f}")
+    ui.click_pct(*ctr(LAYOUT["ad_close_x"]))
+    ui.root.update()
+    check("关闭后恢复 WAITING（剩余时间保留）",
+          m.state is State.WAITING and m.wait_left == left_before,
+          f"wait_left={m.wait_left:.3f}")
+    img = shot(ui, "10_resume_waiting")
+    check("恢复后求福可检（自动继续）", qiufu_match(img, tpl) >= 0.85,
+          f"match={qiufu_match(img, tpl):.2f}")
+
+    # 7b. 打断 CATCH
+    drive_to_catch(ui)
+    assert m.state is State.CATCH and m.catch is not None, m.state
+    fish_before = m.catch.name
+    check("CATCH 可被弹窗打断", m.force_random_popup() and m.state is State.RANDOM_POPUP)
+    img = shot(ui, "11_popup_over_catch")
+    check("打断 CATCH 的弹窗下求福不可检", qiufu_match(img, tpl) < 0.30,
+          f"match={qiufu_match(img, tpl):.2f}")
+    ui.click_pct(*ctr(LAYOUT["ad_close_x"]))
+    ui.root.update()
+    check("关闭后恢复 CATCH（鱼获保留）",
+          m.state is State.CATCH and m.catch is not None and m.catch.name == fish_before,
+          m.catch.name if m.catch else m.state.name)
+    img = shot(ui, "12_resume_catch")
+    check("恢复后结算画面求福可检", qiufu_match(img, tpl) >= 0.85,
+          f"match={qiufu_match(img, tpl):.2f}")
+    ui.click_pct(*ctr(LAYOUT["btn_left"]))       # 正常处理掉这条鱼
+    ui.root.update()
+    assert m.state is State.READY, m.state
+
+    # 7c. 打断 READY
+    check("READY 可被弹窗打断", m.force_random_popup() and m.state is State.RANDOM_POPUP)
+    img = shot(ui, "13_popup_over_ready")
+    check("打断 READY 的弹窗下求福不可检", qiufu_match(img, tpl) < 0.30,
+          f"match={qiufu_match(img, tpl):.2f}")
+    ui.click_pct(*ctr(LAYOUT["ad_close_x"]))
+    ui.root.update()
+    img = shot(ui, "14_resume_ready")
+    check("关闭后回到 READY 且求福可检（自动继续）",
+          m.state is State.READY and qiufu_match(img, tpl) >= 0.85,
+          f"match={qiufu_match(img, tpl):.2f}")
 
     ui.root.destroy()
     print()

@@ -288,7 +288,13 @@ class GameUI:
             self._draw_order_panel(highlight_idx=m.order_detail_idx)
             self._draw_order_detail()
         elif st is State.RANDOM_POPUP:
+            # 弹窗盖在被打断的场景之上（真实游戏：公告随时可能盖住等待/结算画面）
             self._draw_fishing_chrome()
+            if m.return_state is State.WAITING:
+                self._draw_order_panel()
+                self._draw_waiting_scene()
+            elif m.return_state is State.CATCH:
+                self._draw_catch()
             self._draw_ad()
 
     def _draw_waiting_scene(self) -> None:

@@ -9,7 +9,7 @@ import random
 from dataclasses import dataclass
 from enum import Enum
 
-from config import (LAYOUT, RANDOM_AD_CHANCE, THEMES, in_zone)
+from config import (LAYOUT, RANDOM_AD_CHANCE, RANDOM_AD_PER_SEC, THEMES, in_zone)
 from fish_data import RARITIES, roll_fish, roll_rarity
 from orders import OrderSystem
 
@@ -37,12 +37,15 @@ class Catch:
 class GameModel:
     def __init__(self, seed: int | None = None, wait_min: float = 6.0,
                  wait_max: float = 15.0, force_rarities: list[str] | None = None,
-                 force_order: bool = False) -> None:
+                 force_order: bool = False, ad_rate: float = RANDOM_AD_PER_SEC,
+                 force_popup: bool = False) -> None:
         self.rng = random.Random(seed)
         self.wait_min, self.wait_max = wait_min, wait_max
         self.force_rarities = force_rarities or []
         self._force_i = 0
         self.force_order = force_order
+        self.ad_rate = ad_rate            # 钓鱼三态期间随机插入活动公告的每秒概率（0=禁用）
+        self._popup_pending = force_popup  # --force-popup：进入钓鱼后立即弹一次（测试钩子）
 
         self.state = State.HOME
         self.theme = self.rng.choice(THEMES)
@@ -105,10 +108,25 @@ class GameModel:
         self.total_catch += 1
         self.catch = None
         if self.rng.random() < RANDOM_AD_CHANCE:
+            self.return_state = State.READY   # 卖鱼后弹出：关闭后进入新的准备态
             self.state = State.RANDOM_POPUP
             self._log("RANDOM_POPUP")
         else:
             self._enter_ready()
+
+    def _interrupt_popup(self) -> None:
+        """活动公告在钓鱼任意阶段插入（极端条件）：记住被打断的状态，关闭后原样恢复
+        —— WAITING 的剩余等待时间与 CATCH 的鱼获都保留，弹窗期间等待计时暂停。"""
+        self.return_state = self.state
+        self.state = State.RANDOM_POPUP
+        self._log(f"RANDOM_POPUP interrupt {self.return_state.name}")
+
+    def force_random_popup(self) -> bool:
+        """测试钩子：立即在当前钓鱼阶段插入活动公告。返回是否成功（非钓鱼三态时失败）。"""
+        if self.state in (State.READY, State.WAITING, State.CATCH):
+            self._interrupt_popup()
+            return True
+        return False
 
     # ---------------------------------------------------------------- 点击路由
     def click(self, x: float, y: float) -> str:
@@ -128,13 +146,16 @@ class GameModel:
 
         if st is State.RANDOM_POPUP:
             if in_zone(LAYOUT["ad_close_x"], x, y):
-                self._enter_ready()
-                self._log("CLOSE random_popup")
+                if self.return_state in (State.WAITING, State.CATCH):
+                    self.state = self.return_state   # 原样恢复被打断的阶段（不换背景/不重置计时）
+                else:
+                    self._enter_ready()              # 打断 READY / 卖鱼后弹出：回到准备态
+                self._log(f"CLOSE random_popup -> {self.state.name}")
                 return "close_ad"
             return "ignore"
 
-        # 设置按钮（钓鱼三态均可用）
-        if in_zone(LAYOUT["settings"], x, y):
+        # 设置按钮（READY/CATCH 可用；等待期任何点击无效，故排除 WAITING）
+        if st is not State.WAITING and in_zone(LAYOUT["settings"], x, y):
             self.equip_visible = not self.equip_visible
             self._log(f"equip_visible={self.equip_visible}")
             return "toggle_equip"
@@ -176,6 +197,15 @@ class GameModel:
     # ---------------------------------------------------------------- 时钟
     def tick(self, dt: float) -> None:
         self.clock += dt
+        # 活动公告可在钓鱼任意阶段插入（极端条件检测）；弹窗期间 WAITING 计时暂停
+        if self.state in (State.READY, State.WAITING, State.CATCH):
+            if self._popup_pending:
+                self._popup_pending = False
+                self._interrupt_popup()
+                return
+            if self.ad_rate > 0 and self.rng.random() < self.ad_rate * dt:
+                self._interrupt_popup()
+                return
         if self.state is State.WAITING:
             self.wait_left -= dt
             if self.wait_left <= 0:
