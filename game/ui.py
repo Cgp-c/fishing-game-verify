@@ -112,6 +112,7 @@ class GameUI:
         self.canvas.bind("<Button-1>", self._on_click)
         self._last = None            # (state, theme, equip, catch签名) 变化检测
         self._anim_i = 0
+        self.paused = False          # 测试用：暂停自动 tick/动画，由外部显式驱动
         self.root.after(50, self._frame)
 
     # ---------------------------------------------------------------- 事件
@@ -128,9 +129,10 @@ class GameUI:
 
     # ---------------------------------------------------------------- 主循环
     def _frame(self) -> None:
-        self.model.tick(0.05)
-        self._anim_i += 1
-        self.render(force=self._needs_full_redraw())
+        if not self.paused:
+            self.model.tick(0.05)
+            self._anim_i += 1
+            self.render(force=self._needs_full_redraw())
         self.root.after(50, self._frame)
 
     def _needs_full_redraw(self) -> bool:

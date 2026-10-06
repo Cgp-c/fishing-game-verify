@@ -7,3 +7,6 @@ venv/
 *.log
 .DS_Store
 Thumbs.db
+
+# 测试截图产物
+tests/__screenshots__/
